@@ -2,30 +2,87 @@ import time
 import random
 import threading
 import os
-# ប្រើប្រាស់ seleniumwire ជំនួសវិញដើម្បីដោះស្រាយរឿង Proxy មាន Username & Password
-from seleniumwire import webdriver as wire_webdriver
+import zipfile
 import undetected_chromedriver as uc
 
 driver_lock = threading.Lock()
+
+# មុខងារជំនួយសម្រាប់បង្កើត Extension បញ្ចូល Username និង Password ទៅកាន់ Chrome
+def create_proxy_auth_extension(proxy_host, proxy_port, proxy_user, proxy_pass, thread_id):
+    extension_dir = f"proxy_auth_ext_{thread_id}"
+    if not os.path.exists(extension_dir):
+        os.makedirs(extension_dir)
+        
+    manifest_json = """
+    {
+        "version": "1.0.0",
+        "manifest_version": 3,
+        "name": "Chrome Proxy Auth Extension",
+        "permissions": ["proxy", "tabs", "unlimitedStorage", "storage", "<all_urls>", "webRequest", "webRequestAuthProvider"],
+        "background": {
+            "service_worker": "background.js"
+        }
+    }
+    """
+    
+    background_js = f"""
+    var config = {{
+        mode: "fixed_servers",
+        rules: {{
+            singleProxy: {{
+                scheme: "http",
+                host: "{proxy_host}",
+                port: parseInt({proxy_port})
+            }},
+            bypassList: []
+        }}
+    }};
+
+    chrome.proxy.settings.set({{value: config, scope: "regular"}}, function() {{}});
+
+    chrome.webRequest.onAuthRequired.addListener(
+        function details(details) {{
+            return {{
+                authCredentials: {{
+                    username: "{proxy_user}",
+                    password: "{proxy_pass}"
+                }}
+            }};
+        }},
+        {{urls: ["<all_urls>"]}},
+        ["blocking"]
+    );
+    """
+    
+    zip_path = f"proxy_auth_ext_{thread_id}.zip"
+    with zipfile.ZipFile(zip_path, 'w') as zp:
+        zp.writestr("manifest.json", manifest_json)
+        zp.writestr("background.js", background_js)
+        
+    return zip_path
 
 def watch_video_thread(thread_id, video_url, agent, proxy_line):
     # បំបែកទិន្នន័យ proxy ទម្រង់ user:pass@ip:port
     try:
         auth_part, ip_part = proxy_line.strip().split('@')
         username, password = auth_part.split(':')
-        proxy_ip_port = ip_part
+        ip, port = ip_part.split(':')
     except Exception:
         print(f"⚠️ [Thread {thread_id}] ទម្រង់ Proxy មិនត្រឹមត្រូវ៖ {proxy_line}")
         return
 
-    print(f"🚀 [Thread {thread_id}] ចាប់ផ្តើមដំណើរការជាមួយ Premium IP: {proxy_ip_port}")
+    print(f"🚀 [Thread {thread_id}] ចាប់ផ្តើមដំណើរការជាមួយ Premium IP: {ip}:{port}")
     
     options = uc.ChromeOptions()
     options.add_argument("--headless=new")
     options.add_argument("--mute-audio")
     options.add_argument(f"user-agent={agent}")
     
-    # Arguments សំខាន់ៗការពារកុំឱ្យ Cloud Linux គាំង RAM
+    # ហៅបង្កើត និងដំឡើង Extension Auth ចូលទៅក្នុង Chrome
+    auth_ext_path = create_proxy_auth_extension(ip, port, username, password, thread_id)
+    options.add_argument(f"--load-extension={os.path.abspath(auth_ext_path)}")
+    
+    # Arguments សំខាន់ៗការពារកុំឱ្យ Cloud Linux គាំង
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
@@ -37,22 +94,7 @@ def watch_video_thread(thread_id, video_url, agent, proxy_line):
     try:
         with driver_lock:
             print(f"🛠️ [Thread {thread_id}] កំពុងរៀបចំ និងបើក Browser...")
-            
-            # កំណត់ទិន្នន័យសម្រាប់ទាញយក Proxy Auth តាមរយៈ seleniumwire
-            seleniumwire_options = {
-                'proxy': {
-                    'http': f'http://{username}:{password}@{proxy_ip_port}',
-                    'https': f'https://{username}:{password}@{proxy_ip_port}',
-                    'no_proxy': 'localhost,127.0.0.1'
-                }
-            }
-            
-            # បង្កើត Driver ដោយរួមបញ្ចូលគ្នាជាមួយ undetected_chromedriver និង seleniumwire
-            driver = uc.Chrome(
-                options=options, 
-                version_main=149, 
-                seleniumwire_options=seleniumwire_options
-            )
+            driver = uc.Chrome(options=options, version_main=149)
             time.sleep(2)
             
         driver.set_page_load_timeout(45)
@@ -73,6 +115,12 @@ def watch_video_thread(thread_id, video_url, agent, proxy_line):
                 driver.quit()
             except:
                 pass
+        # សម្អាត File Extension បណ្តោះអាសន្នចេញពីម៉ាស៊ីន
+        try:
+            if os.path.exists(auth_ext_path):
+                os.remove(auth_ext_path)
+        except:
+            pass
 
 def load_proxies_from_file(file_name="proxyscrape_premium_http_proxies.txt"):
     print(f"\n📂 កំពុងអានទិន្នន័យ Premium Proxy ពីឯកសារ {file_name}...")
@@ -116,7 +164,7 @@ if __name__ == "__main__":
                 t.start()  
                 
                 user_counter += 1  
-                time.sleep(1.5)  # រង់ចាំ ១.៥ វិនាទី ដើម្បីកុំឱ្យបុកប្រព័ន្ធ Cloud ខ្លាំងពេក
+                time.sleep(1.5)  # រង់ចាំ ១.៥ វិនាទី ការពារ CPU
                 
             print("\n🔄 បានប្រើប្រាស់បញ្ជី Proxy ជុំនេះអស់ហើយ! កំពុងចាប់ផ្តើមជុំថ្មីឡើងវិញ...")
         else:
