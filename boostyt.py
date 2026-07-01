@@ -1,13 +1,15 @@
 import time
 import random
 import threading
-import uc_auth_proxy_selenium as uc  # 🔥 ប្តូរមកប្រើវិធីគាំទ្រ Proxy មាន Password ឱ្យបានត្រឹមត្រូវ
 import os
+# ប្រើប្រាស់ seleniumwire ជំនួសវិញដើម្បីដោះស្រាយរឿង Proxy មាន Username & Password
+from seleniumwire import webdriver as wire_webdriver
+import undetected_chromedriver as uc
 
 driver_lock = threading.Lock()
 
 def watch_video_thread(thread_id, video_url, agent, proxy_line):
-    # ទម្រង់ទិន្នន័យ៖ user:pass@ip:port
+    # បំបែកទិន្នន័យ proxy ទម្រង់ user:pass@ip:port
     try:
         auth_part, ip_part = proxy_line.strip().split('@')
         username, password = auth_part.split(':')
@@ -23,10 +25,7 @@ def watch_video_thread(thread_id, video_url, agent, proxy_line):
     options.add_argument("--mute-audio")
     options.add_argument(f"user-agent={agent}")
     
-    # កំណត់ទិន្នន័យ Proxy ជាមួយ Username និង Password ឱ្យបានត្រឹមត្រូវ
-    options.add_argument(f"--proxy-server=http://{proxy_ip_port}")
-    
-    # Arguments ចាំបាច់សម្រាប់ឱ្យ Linux លើ GitHub Actions រត់បានរលូនមិនគាំង
+    # Arguments សំខាន់ៗការពារកុំឱ្យ Cloud Linux គាំង RAM
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
@@ -39,16 +38,21 @@ def watch_video_thread(thread_id, video_url, agent, proxy_line):
         with driver_lock:
             print(f"🛠️ [Thread {thread_id}] កំពុងរៀបចំ និងបើក Browser...")
             
-            # ប្រើប្រាស់ version_main=149 ឱ្យត្រូវគ្នានឹង Chrome របស់ GitHub Server
-            # បន្ថែម seleniumwire_options សម្រាប់ហៅផ្ទាំងបញ្ចូល Username/Password អូតូ
-            wire_options = {
+            # កំណត់ទិន្នន័យសម្រាប់ទាញយក Proxy Auth តាមរយៈ seleniumwire
+            seleniumwire_options = {
                 'proxy': {
                     'http': f'http://{username}:{password}@{proxy_ip_port}',
                     'https': f'https://{username}:{password}@{proxy_ip_port}',
                     'no_proxy': 'localhost,127.0.0.1'
                 }
             }
-            driver = uc.Chrome(options=options, version_main=149, seleniumwire_options=wire_options)
+            
+            # បង្កើត Driver ដោយរួមបញ្ចូលគ្នាជាមួយ undetected_chromedriver និង seleniumwire
+            driver = uc.Chrome(
+                options=options, 
+                version_main=149, 
+                seleniumwire_options=seleniumwire_options
+            )
             time.sleep(2)
             
         driver.set_page_load_timeout(45)
@@ -70,7 +74,6 @@ def watch_video_thread(thread_id, video_url, agent, proxy_line):
             except:
                 pass
 
-# 🔥 មុខងារថ្មីសម្រាប់អាន Proxy ផ្ទាល់ពី File ដែលអ្នកបានផ្តល់ជូន
 def load_proxies_from_file(file_name="proxyscrape_premium_http_proxies.txt"):
     print(f"\n📂 កំពុងអានទិន្នន័យ Premium Proxy ពីឯកសារ {file_name}...")
     if not os.path.exists(file_name):
@@ -80,11 +83,10 @@ def load_proxies_from_file(file_name="proxyscrape_premium_http_proxies.txt"):
     with open(file_name, "r") as f:
         proxies = [line.strip() for line in f.readlines() if line.strip() and "@" in line]
     
-    # ធ្វើការលាយបញ្ជីឱ្យចៃដន្យដើម្បីកុំឱ្យរត់ជាន់លំដាប់គ្នាដដែលៗ
     random.shuffle(proxies)
     return proxies
 
-# ==================== ដំណើរការកម្មវិធីមេ (INFINITE AUTO-RUN) ====================
+# ==================== ដំណើរការកម្មវិធីមេ ====================
 if __name__ == "__main__":
     target_video = "https://youtu.be/YuWlVPwXnsc?si=eAgDccQc5GPXVR0N"
     
@@ -99,7 +101,6 @@ if __name__ == "__main__":
     user_counter = 1  
 
     while True:
-        # ហៅអាន Proxy ពី File មកប្រើម្តងទាំងអស់
         proxies_pool = load_proxies_from_file()
         
         if proxies_pool:
@@ -115,9 +116,9 @@ if __name__ == "__main__":
                 t.start()  
                 
                 user_counter += 1  
-                time.sleep(1.5)  # សម្រាក ១.៥ វិនាទី ដើម្បីកុំឱ្យ CPU Server គាំងពេលបើក Premium Proxy ច្រើនពេក
+                time.sleep(1.5)  # រង់ចាំ ១.៥ វិនាទី ដើម្បីកុំឱ្យបុកប្រព័ន្ធ Cloud ខ្លាំងពេក
                 
-            print("\n🔄 បានប្រើប្រាស់បញ្ជី Proxy ក្នុងឯកសារអស់មួយជុំហើយ! កំពុងចាប់ផ្តើមជុំថ្មីឡើងវិញ...")
+            print("\n🔄 បានប្រើប្រាស់បញ្ជី Proxy ជុំនេះអស់ហើយ! កំពុងចាប់ផ្តើមជុំថ្មីឡើងវិញ...")
         else:
-            print("❌ គ្មានទិន្នន័យ Proxy ក្នុង File ទេ! រង់ចាំ ៣០ វិនាទី...")
+            print("❌ គ្មានទិន្នន័យ Proxy ទេ! រង់ចាំ ៣០ វិនាទី...")
             time.sleep(30)
