@@ -3,7 +3,7 @@ import random
 import threading
 import requests  
 import undetected_chromedriver as uc
-import os # 🔥 បន្ថែមសម្រាប់ឆែកមើលប្រភេទ OS (Windows ឬ Linux)
+import os  # ប្រើសម្រាប់ឆែកមើលប្រភេទ OS (Windows ឬ Linux)
 
 driver_lock = threading.Lock()
 
@@ -16,12 +16,12 @@ def watch_video_thread(thread_id, video_url, agent, proxy):
     options.add_argument(f"user-agent={agent}")
     options.add_argument(f"--proxy-server=http://{proxy}")
     
-    # 💡 បន្ថែម Arguments ទាំងនេះដើម្បីឱ្យសេវាកម្ម Linux លើ GitHub Actions រត់បានរលូនមិនគាំង
+    # Arguments ចាំបាច់បំផុតសម្រាប់ឱ្យ Linux លើ GitHub Actions រត់បានរលូនមិនគាំង
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     
-    # 🔎 ប្រសិនបើរត់នៅលើ Windows ឱ្យកំណត់ផ្លូវទៅកាន់ឯកសារ Chrome ផ្លូវការ
+    # ប្រសិនបើរត់នៅលើ Windows ឱ្យកំណត់ផ្លូវទៅកាន់ឯកសារ Chrome ផ្លូវការ
     if os.name == 'nt': 
         options.binary_location = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
     
@@ -30,14 +30,9 @@ def watch_video_thread(thread_id, video_url, agent, proxy):
         with driver_lock:
             print(f"🛠️ [Thread {thread_id}] កំពុងរៀបចំ និងបើក Browser...")
             
-            # 🔎 បំបែកលក្ខខណ្ឌបើក Browser ទៅតាមប្រព័ន្ធប្រតិបត្តិការ (OS)
-            if os.name == 'nt':
-                # កូដដើមសម្រាប់ Windows របស់អ្នក
-                driver = uc.Chrome(options=options, version_main=149)
-            else:
-                # សម្រាប់ GitHub Actions (Linux) ទុកឱ្យប្រព័ន្ធស្វែងរក Chrome លំនាំដើមដោយស្វ័យប្រវត្ត
-                driver = uc.Chrome(options=options)
-                
+            # បង្ខំឱ្យប្រើប្រាស់ version_main=149 ដូចគ្នាទាំងនៅលើ Windows និង GitHub Linux
+            # ដើម្បីដោះស្រាយបញ្ហា ChromeDriver version 150 មិនស៊ីគ្នានឹង Chrome 149 របស់ GitHub Server
+            driver = uc.Chrome(options=options, version_main=149)
             time.sleep(2)
             
         driver.set_page_load_timeout(35)
@@ -75,6 +70,7 @@ def get_live_proxies_fast_api(limit=100):
 if __name__ == "__main__":
     target_video = "https://youtu.be/YuWlVPwXnsc?si=eAgDccQc5GPXVR0N"
     
+    # បង្កើត User Agents Pool ឱ្យកាន់តែច្រើន ដើម្បីឱ្យ User នីមួយៗខុសៗគ្នាពិតប្រាកដ
     user_agents_pool = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -83,9 +79,11 @@ if __name__ == "__main__":
         "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1"
     ]
 
-    user_counter = 1  
+    user_counter = 1  # ប្រើសម្រាប់រាប់ចំនួនសរុបនៃ User (Thread) ដែលបានបង្កើត
 
+    # 🔥 Loop ដំណើរការឥតឈប់ឈរ បង្កើត User ថ្មីៗរហូតដល់បិទកម្មវិធី
     while True:
+        # ទាញយក Proxy មកម្តង ១០០ IP ផ្សេងៗគ្នា
         proxies_pool = get_live_proxies_fast_api(limit=100)
         
         if proxies_pool and proxies_pool[0] != "":
@@ -95,15 +93,19 @@ if __name__ == "__main__":
                 if not proxy.strip():
                     continue
                     
+                # ជ្រើសរើស User Agent ដោយចៃដន្យដើម្បីកុំឱ្យជាន់គ្នា
                 random_agent = random.choice(user_agents_pool)
                 
+                # បង្កើត Thread ថ្មីសម្រាប់ User ម្នាក់ៗ
                 t = threading.Thread(
                     target=watch_video_thread, 
                     args=(user_counter, target_video, random_agent, proxy)
                 )
-                t.start()  
+                t.start()  # បើកឱ្យដំណើរការភ្លាមៗ (មិនប្រើ t.join() ទេ គឺលែងឱ្យវាហោះសេរី)
                 
-                user_counter += 1  
+                user_counter += 1  # កើនចំនួន User បន្ទាប់
+                
+                # សម្រាកបន្តិច (០.៥ វិនាទី) មុននឹងបង្កើត User បន្ទាប់ ដើម្បីកុំឱ្យ CPU Server គាំង
                 time.sleep(0.5)
                 
             print("\n🔄 បញ្ជូនកងទ័ព User ជុំនេះទៅអស់ហើយ! កំពុងទាញយក IP ថ្មីសម្រាប់បុកបន្តទៀត...")
