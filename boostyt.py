@@ -41,7 +41,7 @@ def watch_video_thread(thread_id, video_url, agent, proxy):
         driver.set_page_load_timeout(45)
         driver.get(video_url)
         
-        watch_time = random.randint(120, 180)
+        watch_time = random.randint(25, 60)
         print(f"📺 [Thread {thread_id}] កំពុងមើលវីដេអូ រង់ចាំ {watch_time} វិនាទី...")
         time.sleep(watch_time)
         
