@@ -1,88 +1,24 @@
 import time
 import random
 import threading
-import os
-import zipfile
+import requests  
 import undetected_chromedriver as uc
+import os
+from concurrent.futures import ThreadPoolExecutor
+
+# កំណត់ចំនួន Browser ខ្ពស់បំផុតដែលអាចបើកដំណើរការស្របគ្នាក្នុងពេលតែមួយ (ការពារកុំឱ្យគាំង RAM)
+MAX_CONCURRENT_BLAST = 5  
 
 driver_lock = threading.Lock()
 
-# មុខងារជំនួយសម្រាប់បង្កើត Extension បញ្ចូល Username និង Password ទៅកាន់ Chrome
-def create_proxy_auth_extension(proxy_host, proxy_port, proxy_user, proxy_pass, thread_id):
-    extension_dir = f"proxy_auth_ext_{thread_id}"
-    if not os.path.exists(extension_dir):
-        os.makedirs(extension_dir)
-        
-    manifest_json = """
-    {
-        "version": "1.0.0",
-        "manifest_version": 3,
-        "name": "Chrome Proxy Auth Extension",
-        "permissions": ["proxy", "tabs", "unlimitedStorage", "storage", "<all_urls>", "webRequest", "webRequestAuthProvider"],
-        "background": {
-            "service_worker": "background.js"
-        }
-    }
-    """
-    
-    background_js = f"""
-    var config = {{
-        mode: "fixed_servers",
-        rules: {{
-            singleProxy: {{
-                scheme: "http",
-                host: "{proxy_host}",
-                port: parseInt({proxy_port})
-            }},
-            bypassList: []
-        }}
-    }};
-
-    chrome.proxy.settings.set({{value: config, scope: "regular"}}, function() {{}});
-
-    chrome.webRequest.onAuthRequired.addListener(
-        function details(details) {{
-            return {{
-                authCredentials: {{
-                    username: "{proxy_user}",
-                    password: "{proxy_pass}"
-                }}
-            }};
-        }},
-        {{urls: ["<all_urls>"]}},
-        ["blocking"]
-    );
-    """
-    
-    zip_path = f"proxy_auth_ext_{thread_id}.zip"
-    with zipfile.ZipFile(zip_path, 'w') as zp:
-        zp.writestr("manifest.json", manifest_json)
-        zp.writestr("background.js", background_js)
-        
-    return zip_path
-
-def watch_video_thread(thread_id, video_url, agent, proxy_line):
-    # បំបែកទិន្នន័យ proxy ទម្រង់ user:pass@ip:port
-    try:
-        auth_part, ip_part = proxy_line.strip().split('@')
-        username, password = auth_part.split(':')
-        ip, port = ip_part.split(':')
-    except Exception:
-        print(f"⚠️ [Thread {thread_id}] ទម្រង់ Proxy មិនត្រឹមត្រូវ៖ {proxy_line}")
-        return
-
-    print(f"🚀 [Thread {thread_id}] ចាប់ផ្តើមដំណើរការជាមួយ Premium IP: {ip}:{port}")
+def watch_video_thread(thread_id, video_url, agent, proxy):
+    print(f"🚀 [Thread {thread_id}] ចាប់ផ្តើមដំណើរការជាមួយ IP: {proxy}")
     
     options = uc.ChromeOptions()
     options.add_argument("--headless=new")
     options.add_argument("--mute-audio")
     options.add_argument(f"user-agent={agent}")
-    
-    # ហៅបង្កើត និងដំឡើង Extension Auth ចូលទៅក្នុង Chrome
-    auth_ext_path = create_proxy_auth_extension(ip, port, username, password, thread_id)
-    options.add_argument(f"--load-extension={os.path.abspath(auth_ext_path)}")
-    
-    # Arguments សំខាន់ៗការពារកុំឱ្យ Cloud Linux គាំង
+    options.add_argument(f"--proxy-server=http://{proxy}")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
@@ -94,13 +30,18 @@ def watch_video_thread(thread_id, video_url, agent, proxy_line):
     try:
         with driver_lock:
             print(f"🛠️ [Thread {thread_id}] កំពុងរៀបចំ និងបើក Browser...")
-            driver = uc.Chrome(options=options, version_main=149)
+            
+            if os.name != 'nt':
+                driver = uc.Chrome(options=options, version_main=149)
+            else:
+                driver = uc.Chrome(options=options)
+                
             time.sleep(2)
             
         driver.set_page_load_timeout(45)
         driver.get(video_url)
         
-        watch_time = random.randint(15, 25)
+        watch_time = random.randint(120, 180)
         print(f"📺 [Thread {thread_id}] កំពុងមើលវីដេអូ រង់ចាំ {watch_time} វិនាទី...")
         time.sleep(watch_time)
         
@@ -115,58 +56,62 @@ def watch_video_thread(thread_id, video_url, agent, proxy_line):
                 driver.quit()
             except:
                 pass
-        # សម្អាត File Extension បណ្តោះអាសន្នចេញពីម៉ាស៊ីន
-        try:
-            if os.path.exists(auth_ext_path):
-                os.remove(auth_ext_path)
-        except:
-            pass
 
-def load_proxies_from_file(file_name="proxyscrape_premium_http_proxies.txt"):
-    print(f"\n📂 កំពុងអានទិន្នន័យ Premium Proxy ពីឯកសារ {file_name}...")
-    if not os.path.exists(file_name):
-        print(f"❌ រកមិនឃើញឯកសារ {file_name} ឡើយ!")
+def get_live_proxies_fast_api():
+    print("\n🌐 កំពុងទាក់ទងទៅ Proxyscrape API ដើម្បីទាញយក Proxy ថ្មីៗល្បឿនលឿន (យកទាំងអស់)...")
+    api_url = "https://raw.githubusercontent.com/obitokh/proxy/refs/heads/main/proxyscrape_premium_http_proxies.txt"
+    try:
+        response = requests.get(api_url, timeout=30)
+        all_proxies = [line.strip() for line in response.text.split("\r\n") if line.strip()]
+        # លាយឡំ Proxy ឱ្យមានភាពចៃដន្យ
+        random.shuffle(all_proxies)
+        return all_proxies
+    except Exception as e:
+        print(f"❌ មិនអាចទាញយក Proxy បានទេ៖ {e}")
         return []
-        
-    with open(file_name, "r") as f:
-        proxies = [line.strip() for line in f.readlines() if line.strip() and "@" in line]
-    
-    random.shuffle(proxies)
-    return proxies
 
-# ==================== ដំណើរការកម្មវិធីមេ ====================
+# ==================== ដំណើរការកម្មវិធីមេ (AUTO-RUN LOOP) ====================
 if __name__ == "__main__":
-    target_video = "https://youtu.be/YuWlVPwXnsc?si=eAgDccQc5GPXVR0N"
-    
+    target_video = "https://youtu.be/YuWlVPwXnsc?si=fT4Jz57tYtv40hrs"
+    round_count = 1  
+    global_user_counter = 1  # បញ្ជីរាប់ឈ្មោះ User កើនឡើងទៅមុខឥតដែនកំណត់
+
     user_agents_pool = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/21000101 Firefox/119.0",
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1"
+        "Mozilla/5.0 (Linux; Android 13; SM-S901B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Mobile Safari/537.36"
     ]
 
-    user_counter = 1  
-
+    # 🔥 Loop រត់រហូតមិនចេះឈប់លើ Cloud
     while True:
-        proxies_pool = load_proxies_from_file()
+        print(f"\n⚡🔄⚡ ================== ចាប់ផ្តើមរត់ AUTO ជុំទី {round_count} ================== ⚡🔄⚡")
         
-        if proxies_pool:
-            print(f"🎯 ចាប់ផ្តើមបុកដំណើរការជាមួយ Premium Proxy ទាំងចំនួន {len(proxies_pool)} គ្រាប់!")
+        proxies_pool = get_live_proxies_fast_api()
+        
+        if proxies_pool and proxies_pool[0] != "":
+            print(f"🎯 ទទួលបាន {len(proxies_pool)} Proxies សម្រាប់បុកក្នុងជុំនេះ!")
+            print(f"⚙️ ប្រព័ន្ធនឹងបើកដំណើរការត្រួតគ្នាខ្ពស់បំផុតម្តង {MAX_CONCURRENT_BLAST} Threads ដើម្បីរក្សាទម្រង់ RAM។")
             
-            for proxy in proxies_pool:
-                random_agent = random.choice(user_agents_pool)
-                
-                t = threading.Thread(
-                    target=watch_video_thread, 
-                    args=(user_counter, target_video, random_agent, proxy)
-                )
-                t.start()  
-                
-                user_counter += 1  
-                time.sleep(1.5)  # រង់ចាំ ១.៥ វិនាទី ការពារ CPU
-                
-            print("\n🔄 បានប្រើប្រាស់បញ្ជី Proxy ជុំនេះអស់ហើយ! កំពុងចាប់ផ្តើមជុំថ្មីឡើងវិញ...")
+            # ប្រើប្រាស់ ThreadPoolExecutor ដើម្បីគ្រប់គ្រងទិន្នន័យ User ឥតដែនកំណត់ដោយសុវត្ថិភាព
+            with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_BLAST) as executor:
+                for proxy in proxies_pool:
+                    random_agent = random.choice(user_agents_pool)
+                    
+                    # បញ្ជូន Thread ទៅដំណើរការ និងបង្កើនលេខ User រហូត
+                    executor.submit(watch_video_thread, global_user_counter, target_video, random_agent, proxy)
+                    global_user_counter += 1
+                    
+                    # ពន្យារពេល ២ វិនាទីមុននឹងបើក Browser បន្ទាប់ កុំឱ្យ CPU ដំណើរការខ្លាំងពេក
+                    time.sleep(2)
+
+            print(f"\n🎉 [មេកង] ជុំទី {round_count} ត្រូវបានបញ្ចប់សព្វគ្រប់!")
+            round_count += 1  # បូកជុំឡើងទៅមុខឥតកំណត់
+            
+            # សម្រាក ១០ វិនាទី មុននឹងទាញ API បុកជុំថ្មី
+            print("⏳ សម្រាក ១០ វិនាទី មុននឹងចាប់ផ្តើមជុំបន្ទាប់...")
+            time.sleep(10)
         else:
-            print("❌ គ្មានទិន្នន័យ Proxy ទេ! រង់ចាំ ៣០ វិនាទី...")
+            print("❌ គ្មានទិន្នន័យ Proxy ទេ! រង់ចាំ ៣០ វិនាទី រួចសាកល្បងទៅបឺតយកម្តងទៀត...")
             time.sleep(30)
